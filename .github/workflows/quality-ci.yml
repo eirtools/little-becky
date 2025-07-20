@@ -1,0 +1,55 @@
+---
+name: Verify Quality Checks
+
+on:
+  pull_request:
+    types: [assigned, opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      renovate: ${{ steps.filter.outputs.renovate }}
+    steps:
+    - uses: dorny/paths-filter@v3
+      id: filter
+      with:
+        filters: |
+          renovate:
+          - '.github/renovate.json'
+          - '.github/workflows/renovate-verify.yml'
+
+  verify-renovate:
+    needs: changes
+    if: ${{ needs.changes.outputs.renovate == 'true' }}
+
+    name: Renovate official check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - uses: actions/setup-node@v4
+    - run: npx --package renovate -c 'renovate-config-validator'
+
+  pre-commit:
+    name: Pre-commit checks
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+        cache: pip
+    - name: Install dependencies
+      run: pip install -U pip setuptools wheel pre-commit
+    - uses: actions/cache@v4
+      with:
+        path: ~/.cache/pre-commit/
+        key: pre-commit-4|${{ env.pythonLocation }}|${{ hashFiles('.pre-commit-config.yaml') }}
+    - name: Run pre-commit hooks
+      run: pre-commit run --all-files --show-diff-on-failure
