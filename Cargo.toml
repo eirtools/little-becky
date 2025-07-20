@@ -1,0 +1,23 @@
+[package]
+name = "little-becky"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+readme = ".cargo/README.md"
+description = "Simple backup with copy-on-change model."
+repository = "https://github.com/eirtools/little-becky"
+keywords = ["backup", "copy-on-write"]
+categories = ["backup", "no-std", "parsing"]
+exclude = ["/.github", "/examples", ".cargo/README.md"]
+
+[dependencies]
+clap = { version = "4.5.45", features = ["derive"] }
+
+notify = { version = "8.2.0" }
+notify-debouncer-full = { version = "0.6.0" }
+enum-display = { version = "0.1.4" }
+papaya = { version = "0.2.3" }
+log = { version = "0.4.27" }
+simplelog = { version = "0.12.2" }
+
+chrono = { version = "0.4.41" }
