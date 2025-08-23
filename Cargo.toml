@@ -7,7 +7,7 @@ readme = ".cargo/README.md"
 description = "Simple backup with copy-on-change model."
 repository = "https://github.com/eirtools/little-becky"
 keywords = ["backup", "copy-on-write"]
-categories = ["backup", "no-std", "parsing"]
+categories = ["filesystem", "command-line-utilities"]
 exclude = ["/.github", "/examples", ".cargo/README.md"]
 
 [dependencies]
