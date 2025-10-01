@@ -15,7 +15,7 @@ clap = { version = "4.5.47", features = ["derive"] }
 
 notify = { version = "8.2.0" }
 notify-debouncer-full = { version = "0.6.0" }
-enum-display = { version = "0.1.4" }
+enum-display = { version = "0.2.1" }
 papaya = { version = "0.2.3" }
 log = { version = "0.4.28" }
 simplelog = { version = "0.12.2" }
