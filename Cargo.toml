@@ -17,7 +17,7 @@ notify = { version = "8.2.0" }
 notify-debouncer-full = { version = "0.6.0" }
 enum-display = { version = "0.2.1" }
 papaya = { version = "0.2.3" }
-log = { version = "0.4.28" }
+log = { version = "0.4.29" }
 simplelog = { version = "0.12.2" }
 
 chrono = { version = "0.4.42" }
