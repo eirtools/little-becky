@@ -11,7 +11,7 @@ categories = ["filesystem", "command-line-utilities"]
 exclude = ["/.github", "/examples", ".cargo/README.md"]
 
 [dependencies]
-clap = { version = "4.5.53", features = ["derive"] }
+clap = { version = "4.5.54", features = ["derive"] }
 
 notify = { version = "8.2.0" }
 notify-debouncer-full = { version = "0.6.0" }
