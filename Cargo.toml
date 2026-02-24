@@ -20,4 +20,4 @@ papaya = { version = "0.2.3" }
 log = { version = "0.4.29" }
 simplelog = { version = "0.12.2" }
 
-chrono = { version = "0.4.43" }
+chrono = { version = "0.4.44" }
