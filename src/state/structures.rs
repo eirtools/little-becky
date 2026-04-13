@@ -46,10 +46,26 @@ pub(super) struct State {
     source_info: SourceInfo,
 
     /// Current file number.
-    pub(super) number: u64,
+    pub(super) file_id: u64,
 
     /// Current last time. `0` if not registered.
     pub(super) last_time: u128,
+}
+
+pub struct StateUpdateResult {
+    file_id: u64,
+    last_time: u128,
+    force_update: bool,
+}
+
+impl StateUpdateResult {
+    pub fn new(file_id: u64, last_time: u128, force: bool) -> Self {
+        Self {
+            file_id,
+            last_time,
+            force_update: force,
+        }
+    }
 }
 
 impl State {
@@ -58,7 +74,7 @@ impl State {
         Self {
             lock: Arc::new(AtomicBool::new(false)),
             source_info,
-            number,
+            file_id: number,
             last_time,
         }
     }
@@ -66,7 +82,7 @@ impl State {
     /// Update state inside acquired lock using `update_fn`.
     pub(super) fn update<F>(&mut self, destination: &Path, update_fn: F)
     where
-        F: Fn(&Path, &SourceInfo, u64, u128) -> (u64, u128),
+        F: Fn(&Path, &SourceInfo, u64, u128) -> StateUpdateResult,
     {
         let lock = self.lock.clone();
 
@@ -81,11 +97,14 @@ impl State {
             while lock.load(Ordering::Relaxed) {}
         }
 
-        let (number, last_time) =
-            update_fn(destination, &self.source_info, self.number, self.last_time);
+        let StateUpdateResult {
+            file_id,
+            last_time,
+            force_update,
+        } = update_fn(destination, &self.source_info, self.file_id, self.last_time);
 
-        if last_time > self.last_time {
-            self.number = number;
+        if force_update || last_time > self.last_time {
+            self.file_id = file_id;
             self.last_time = last_time;
         }
 
@@ -101,7 +120,7 @@ impl std::fmt::Display for State {
             write!(
                 f,
                 "Number: {:x}, Last time: {}",
-                self.number,
+                self.file_id,
                 time_utils::format_time(self.last_time)
             )
         }?;

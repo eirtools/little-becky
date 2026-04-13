@@ -72,10 +72,6 @@ fn convert_sources(sources: &Vec<PathBuf>) -> Result<Vec<PathBuf>, CliError> {
             continue;
         }
 
-        if !source_file.is_file() {
-            return Err(CliError::SourceNotAFile(source.clone()));
-        }
-
         if source_file.file_stem().is_none() {
             return Err(CliError::SourceNoFileStem(source.clone()));
         };
@@ -102,7 +98,6 @@ pub enum CliError {
         filename: PathBuf,
         error: std::io::Error,
     },
-    SourceNotAFile(PathBuf),
     SourceNoFileStem(PathBuf),
     DestinationFolder {
         filename: PathBuf,
@@ -118,9 +113,6 @@ impl std::fmt::Display for CliError {
                 f,
                 "Unable to resolve absolute path for \"{filename:?}\": {error:#?}"
             ),
-            CliError::SourceNotAFile(filename) => {
-                write!(f, "Source path \"{filename:?}\" is not a file.")
-            }
             CliError::SourceNoFileStem(filename) => {
                 write!(f, "Unable to get file name from {filename:?}.")
             }

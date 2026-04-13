@@ -1,5 +1,7 @@
+use ::std::io::ErrorKind;
 use std::path::{absolute, Path, PathBuf};
 
+use crate::state::StateUpdateResult;
 use crate::state::{update_state, SourceInfo};
 use crate::time_utils;
 
@@ -13,8 +15,7 @@ where
     }
 }
 
-/// Run a backup for a single given path.
-pub fn backup_path(path: &PathBuf) {
+pub fn reset_state(path: &PathBuf) {
     let path = match absolute(path) {
         Ok(path) => path,
         Err(error) => {
@@ -23,15 +24,39 @@ pub fn backup_path(path: &PathBuf) {
         }
     };
 
+    let result = update_state(&path, |_, _, _number, _| StateUpdateResult::new(0, 0, true));
+
+    match result {
+        Ok(_) => {}
+        Err(error) => {
+            log::error!("{error}");
+        }
+    }
+}
+
+/// Run a backup for a single given path.
+pub fn backup_path(path: &PathBuf) {
+    let path = match absolute(path) {
+        Ok(path) => path,
+        Err(error) => {
+            if error.kind() != ErrorKind::NotFound {
+                log::error!("Unable to resolve absolute path for \"{path:?}\": {error:#?}");
+            }
+            return;
+        }
+    };
+
     let result = update_state(
         &path,
-        |destination, source_info, number, last_time| -> (u64, u128) {
+        |destination, source_info, number, last_time| -> StateUpdateResult {
             match try_copy_path(destination, &path, source_info, number, last_time) {
                 Err(err) => {
-                    log::error!("Unable to copy \"{path:?}\": {err}");
-                    (0, 0)
+                    if err.kind() != ErrorKind::NotFound {
+                        log::error!("Unable to copy \"{path:?}\": {err}");
+                    }
+                    StateUpdateResult::new(0, 0, false)
                 }
-                Ok((number, last_time)) => (number, last_time),
+                Ok((number, last_time)) => StateUpdateResult::new(number, last_time, false),
             }
         },
     );

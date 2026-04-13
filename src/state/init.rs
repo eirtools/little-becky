@@ -1,5 +1,6 @@
 use crate::state::{StateInitializeError, DESTINATION_ATM};
 use crate::time_utils;
+use ::std::io::ErrorKind;
 use std::collections::HashMap as StdHashMap;
 use std::path::{Path, PathBuf};
 
@@ -57,11 +58,13 @@ fn maximum_known_value(
 ) -> Result<State, StateInitializeError> {
     let mut number: u64 = 0;
     let mut last_time: u128 = 0;
+
     let prefix_with_underscore = {
         let mut prefix = source_info.prefix.clone();
         prefix.push("_");
         prefix.to_str().map(|a| a.to_owned())
     };
+
     let Some(prefix_with_underscore) = prefix_with_underscore else {
         log::error!("Unable to convert source prefix to UTF-8 string");
         return Err(StateInitializeError::UTF8ConversionError {
@@ -96,9 +99,15 @@ fn maximum_known_value(
 
         let is_file = match file.file_type() {
             Ok(v) => v.is_file(),
-            Err(e) => {
-                log::warn!("Unable to get file type for file {path:?}: {e}");
-                continue;
+            Err(err) => {
+                // TODO: add flag
+                if err.kind() == ErrorKind::NotFound {
+                    // playing with hope
+                    true
+                } else {
+                    log::warn!("Unable to get file type for file {path:?}: {err}");
+                    continue;
+                }
             }
         };
 
@@ -133,8 +142,13 @@ fn maximum_known_value(
         let last_time_fs = match time_utils::fs_time(&path) {
             Ok(last_time_fs) => last_time_fs,
             Err(err) => {
-                log::warn!("Unable to get file timestamp: {path:?}: {err}");
-                continue;
+                // TODO: add flag
+                if err.kind() == ErrorKind::NotFound {
+                    0
+                } else {
+                    log::warn!("Unable to get file timestamp: {path:?}: {err}");
+                    continue;
+                }
             }
         };
 

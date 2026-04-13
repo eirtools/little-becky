@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use notify_debouncer_full::{new_debouncer, DebounceEventResult};
 
-use crate::copy::backup_path;
+use crate::copy::{backup_path, reset_state};
 use crate::time_utils;
 
 /// Watch sources
@@ -68,9 +68,14 @@ fn event_fn(event: notify::Event) {
     match event.kind {
         notify::EventKind::Any => return,
         notify::EventKind::Access(_) => return,
-        notify::EventKind::Create(_) => return, // notify user?
+        notify::EventKind::Create(_) => {}
         notify::EventKind::Modify(_) => {}
-        notify::EventKind::Remove(_) => return, // notify user?
+        notify::EventKind::Remove(_) => {
+            for path in event.paths {
+                reset_state(&path); // sets last_time = 0, keeps number
+            }
+            return;
+        }
         notify::EventKind::Other => return,
     };
 

@@ -8,10 +8,9 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::OnceLock;
 
-pub use self::error::ProcessError;
-pub use self::error::StateInitializeError;
+pub use self::error::{ProcessError, StateInitializeError};
 pub use self::init::initialize_state;
-pub use self::structures::SourceInfo;
+pub use self::structures::{SourceInfo, StateUpdateResult};
 pub use self::update::update_state;
 
 use self::structures::State;
