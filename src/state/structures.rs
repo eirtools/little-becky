@@ -1,7 +1,5 @@
 use std::ffi::OsString;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 use crate::time_utils;
 
@@ -36,12 +34,6 @@ impl TryFrom<&Path> for SourceInfo {
 /// Basic file state information.
 #[derive(Debug, Clone)]
 pub(super) struct State {
-    /// Dead-simple inter-process locking mechanism.
-    ///
-    /// Technically, it may be raw AtomicBool, as state is already wrapped in `papaya::HashMap`.
-    /// And probably it's worth a while to make other fields to be inside Arc as well.
-    lock: Arc<AtomicBool>,
-
     /// Source info such as file stem and extension.
     source_info: SourceInfo,
 
@@ -72,7 +64,6 @@ impl State {
     #[inline]
     pub fn new(source_info: SourceInfo, number: u64, last_time: u128) -> Self {
         Self {
-            lock: Arc::new(AtomicBool::new(false)),
             source_info,
             file_id: number,
             last_time,
@@ -84,19 +75,6 @@ impl State {
     where
         F: Fn(&Path, &SourceInfo, u64, u128) -> StateUpdateResult,
     {
-        let lock = self.lock.clone();
-
-        // I'm not really sure if we really need to spin here.
-        while lock
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        // Attempt to acquire lock; if it fails, keep spinning.
-        {
-            // Because CAS is expensive, on failure we simply load the lock status
-            // and retry CAS only when we detect the lock has been released
-            while lock.load(Ordering::Relaxed) {}
-        }
-
         let StateUpdateResult {
             file_id,
             last_time,
@@ -107,8 +85,6 @@ impl State {
             self.file_id = file_id;
             self.last_time = last_time;
         }
-
-        lock.store(false, Ordering::Relaxed);
     }
 }
 
