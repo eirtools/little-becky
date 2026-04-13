@@ -44,6 +44,7 @@ pub(super) struct State {
     pub(super) last_time: u128,
 }
 
+#[derive(Debug, Default, Clone, Copy)]
 pub struct StateUpdateResult {
     file_id: u64,
     last_time: u128,
@@ -51,11 +52,19 @@ pub struct StateUpdateResult {
 }
 
 impl StateUpdateResult {
-    pub fn new(file_id: u64, last_time: u128, force: bool) -> Self {
+    pub fn reset(file_id: u64) -> Self {
+        Self {
+            file_id,
+            last_time: 0,
+            force_update: true,
+        }
+    }
+
+    pub fn new(file_id: u64, last_time: u128) -> Self {
         Self {
             file_id,
             last_time,
-            force_update: force,
+            force_update: false,
         }
     }
 }
@@ -81,7 +90,13 @@ impl State {
             force_update,
         } = update_fn(destination, &self.source_info, self.file_id, self.last_time);
 
-        if force_update || last_time > self.last_time {
+        // initial setup
+        let zero_file_id = file_id == 0 && self.file_id == 0 && last_time > self.last_time;
+        // after some backups have been made
+        let normal_operation =
+            file_id > self.file_id && (force_update || last_time > self.last_time);
+
+        if zero_file_id || normal_operation {
             self.file_id = file_id;
             self.last_time = last_time;
         }

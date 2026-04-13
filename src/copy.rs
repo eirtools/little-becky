@@ -24,10 +24,14 @@ pub fn reset_state(path: &PathBuf) {
         }
     };
 
-    let result = update_state(&path, |_, _, _number, _| StateUpdateResult::new(0, 0, true));
+    let result = update_state(&path, |_, _, file_id, _| {
+        StateUpdateResult::reset(file_id + 1)
+    });
 
     match result {
-        Ok(_) => {}
+        Ok(_) => {
+            log::info!("Reset \"{path:?}\" info");
+        }
         Err(error) => {
             log::error!("{error}");
         }
@@ -48,15 +52,15 @@ pub fn backup_path(path: &PathBuf) {
 
     let result = update_state(
         &path,
-        |destination, source_info, number, last_time| -> StateUpdateResult {
-            match try_copy_path(destination, &path, source_info, number, last_time) {
+        |destination, source_info, file_id, last_time| -> StateUpdateResult {
+            match try_copy_path(destination, &path, source_info, file_id, last_time) {
                 Err(err) => {
                     if err.kind() != ErrorKind::NotFound {
                         log::error!("Unable to copy \"{path:?}\": {err}");
                     }
-                    StateUpdateResult::new(0, 0, false)
+                    StateUpdateResult::default()
                 }
-                Ok((number, last_time)) => StateUpdateResult::new(number, last_time, false),
+                Ok(result) => result,
             }
         },
     );
@@ -74,15 +78,15 @@ fn try_copy_path(
     destination: &Path,
     source_path: &PathBuf,
     source_info: &SourceInfo,
-    number: u64,
+    file_id: u64,
     last_time: u128,
-) -> std::io::Result<(u64, u128)> {
-    let next_number = if last_time > 0 { number + 1 } else { number };
+) -> std::io::Result<StateUpdateResult> {
+    let next_number = if last_time > 0 { file_id + 1 } else { file_id };
 
     let file_last_modified = time_utils::fs_time(source_path)?;
 
     if file_last_modified <= last_time {
-        return Ok((0, 0));
+        return Ok(StateUpdateResult::default());
     }
 
     let mut filename = source_info.prefix.clone();
@@ -97,5 +101,5 @@ fn try_copy_path(
 
     std::fs::copy(source_path, target_filename)?;
 
-    Ok((next_number, file_last_modified))
+    Ok(StateUpdateResult::new(next_number, file_last_modified))
 }

@@ -153,8 +153,10 @@ fn maximum_known_value(
         };
 
         // Either number of last time wins :P
-        if last_time_fs > last_time || value_num >= number {
+        if value_num >= number {
             number = value_num;
+        }
+        if last_time_fs > last_time {
             last_time = last_time_fs;
         }
     }
