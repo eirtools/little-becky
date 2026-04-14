@@ -1,7 +1,5 @@
 use std::ffi::OsString;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 use crate::time_utils;
 
@@ -36,29 +34,47 @@ impl TryFrom<&Path> for SourceInfo {
 /// Basic file state information.
 #[derive(Debug, Clone)]
 pub(super) struct State {
-    /// Dead-simple inter-process locking mechanism.
-    ///
-    /// Technically, it may be raw AtomicBool, as state is already wrapped in `papaya::HashMap`.
-    /// And probably it's worth a while to make other fields to be inside Arc as well.
-    lock: Arc<AtomicBool>,
-
     /// Source info such as file stem and extension.
     source_info: SourceInfo,
 
     /// Current file number.
-    pub(super) number: u64,
+    pub(super) file_id: u64,
 
     /// Current last time. `0` if not registered.
     pub(super) last_time: u128,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct StateUpdateResult {
+    pub file_id: u64,
+    pub last_time: u128,
+    force_update: bool,
+}
+
+impl StateUpdateResult {
+    pub fn reset(file_id: u64) -> Self {
+        Self {
+            file_id,
+            last_time: 0,
+            force_update: true,
+        }
+    }
+
+    pub fn new(file_id: u64, last_time: u128) -> Self {
+        Self {
+            file_id,
+            last_time,
+            force_update: false,
+        }
+    }
 }
 
 impl State {
     #[inline]
     pub fn new(source_info: SourceInfo, number: u64, last_time: u128) -> Self {
         Self {
-            lock: Arc::new(AtomicBool::new(false)),
             source_info,
-            number,
+            file_id: number,
             last_time,
         }
     }
@@ -66,42 +82,42 @@ impl State {
     /// Update state inside acquired lock using `update_fn`.
     pub(super) fn update<F>(&mut self, destination: &Path, update_fn: F)
     where
-        F: Fn(&Path, &SourceInfo, u64, u128) -> (u64, u128),
+        F: Fn(&Path, &SourceInfo, u64, u128) -> StateUpdateResult,
     {
-        let lock = self.lock.clone();
+        let StateUpdateResult {
+            file_id,
+            last_time,
+            force_update,
+        } = update_fn(destination, &self.source_info, self.file_id, self.last_time);
 
-        // I'm not really sure if we really need to spin here.
-        while lock
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        // Attempt to acquire lock; if it fails, keep spinning.
-        {
-            // Because CAS is expensive, on failure we simply load the lock status
-            // and retry CAS only when we detect the lock has been released
-            while lock.load(Ordering::Relaxed) {}
+        if file_id == 0 && last_time == 0 {
+            return;
         }
 
-        let (number, last_time) =
-            update_fn(destination, &self.source_info, self.number, self.last_time);
+        // initial setup
+        let zero_file_id = file_id == 0 && self.file_id == 0 && last_time > self.last_time;
+        // after some backups have been made
+        let normal_operation =
+            file_id > self.file_id && (force_update || last_time > self.last_time);
 
-        if last_time > self.last_time {
-            self.number = number;
+        log::trace!("Update {:?} with new state ({file_id:x}, {last_time}, {force_update}): {zero_file_id}/{normal_operation}", self.source_info.prefix);
+
+        if zero_file_id || normal_operation {
+            self.file_id = file_id;
             self.last_time = last_time;
         }
-
-        lock.store(false, Ordering::Relaxed);
     }
 }
 
 impl std::fmt::Display for State {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.last_time == 0 {
-            write!(f, "Empty state")
+            write!(f, "Empty state ({:x})", self.file_id)
         } else {
             write!(
                 f,
                 "Number: {:x}, Last time: {}",
-                self.number,
+                self.file_id,
                 time_utils::format_time(self.last_time)
             )
         }?;

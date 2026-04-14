@@ -3,11 +3,10 @@ use std::time::Duration;
 
 use notify_debouncer_full::{new_debouncer, DebounceEventResult};
 
-use crate::copy::backup_path;
-use crate::time_utils;
+use crate::copy::{backup_path, reset_state};
 
 /// Watch sources
-pub fn fs_watcher<'a, I>(sources: I) -> bool
+pub fn fs_watcher<'a, I>(sources: I, fs_timeout: u64) -> bool
 where
     I: IntoIterator<Item = &'a std::path::PathBuf>,
 {
@@ -15,7 +14,7 @@ where
         .into_iter()
         .map(|source| {
             let mut debouncer =
-                match new_debouncer(Duration::from_millis(100), None, event_fn_debounce) {
+                match new_debouncer(Duration::from_millis(fs_timeout), None, event_fn_debounce) {
                     Ok(debouncer) => debouncer,
                     Err(err) => {
                         log::error!("Debouncer init error for {source:?}: {err:#?}");
@@ -56,29 +55,33 @@ fn event_fn_debounce(event: DebounceEventResult) {
             return;
         }
     };
+
+    let mut modified_paths = std::collections::HashSet::new();
+    let mut removed_paths = std::collections::HashSet::new();
+
     for event in events {
-        event_fn(event.event);
+        match event.event.kind {
+            ::notify::EventKind::Create(_) | ::notify::EventKind::Modify(_) => {
+                for path in event.event.paths {
+                    modified_paths.insert(path);
+                }
+            }
+            ::notify::EventKind::Remove(_) => {
+                for path in event.event.paths {
+                    removed_paths.insert(path);
+                }
+            }
+            ::notify::EventKind::Any
+            | ::notify::EventKind::Access(_)
+            | ::notify::EventKind::Other => continue,
+        }
     }
-}
 
-/// Actual event handler
-fn event_fn(event: notify::Event) {
-    log::trace!("watch Event at {}:\n{event:#?}", time_utils::local_now());
+    removed_paths.into_iter().for_each(|path| {
+        reset_state(&path); // sets last_time = 0, keeps number
+    });
 
-    match event.kind {
-        notify::EventKind::Any => return,
-        notify::EventKind::Access(_) => return,
-        notify::EventKind::Create(_) => return, // notify user?
-        notify::EventKind::Modify(_) => {}
-        notify::EventKind::Remove(_) => return, // notify user?
-        notify::EventKind::Other => return,
-    };
-
-    for path in event.paths {
-        let current_time = std::time::Instant::now();
-        backup_path(&path);
-        let elapsed = current_time.elapsed().as_nanos();
-
-        log::debug!("Copy time {elapsed} ns for {path:?}");
-    }
+    modified_paths.into_iter().for_each(|path| {
+        backup_path(&path); // sets last_time = 0, keeps number
+    });
 }

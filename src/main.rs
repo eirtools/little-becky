@@ -27,7 +27,7 @@ fn main() {
 
     copy::initial_copy(&args.sources);
 
-    if !process::fs_watcher(&args.sources) {
+    if !process::fs_watcher(&args.sources, args.fs_timeout) {
         // Unable to start notification listeners
         std::process::exit(3);
     };

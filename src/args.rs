@@ -11,6 +11,13 @@ pub fn parse_arguments() -> Result<CommandLineArgs, CliError> {
 /// Command line arguments
 #[derive(Debug, Parser)]
 pub struct CommandLineArgs {
+    #[clap(
+        long = "fs-timeout",
+        help = "Timeout for FS notify debouncer (ms)",
+        default_value_t = 300
+    )]
+    pub fs_timeout: u64,
+
     #[clap(short = 'o', long = "output", help = "Output folder to backup files")]
     pub destination: PathBuf,
 
@@ -48,6 +55,7 @@ fn verify(args: CommandLineArgs) -> Result<CommandLineArgs, CliError> {
     Ok(CommandLineArgs {
         log_level: args.log_level.clone(),
         destination: args.destination.clone(),
+        fs_timeout: args.fs_timeout,
         sources,
     })
 }
@@ -70,10 +78,6 @@ fn convert_sources(sources: &Vec<PathBuf>) -> Result<Vec<PathBuf>, CliError> {
 
         if result.contains(&source_file) {
             continue;
-        }
-
-        if !source_file.is_file() {
-            return Err(CliError::SourceNotAFile(source.clone()));
         }
 
         if source_file.file_stem().is_none() {
@@ -102,7 +106,6 @@ pub enum CliError {
         filename: PathBuf,
         error: std::io::Error,
     },
-    SourceNotAFile(PathBuf),
     SourceNoFileStem(PathBuf),
     DestinationFolder {
         filename: PathBuf,
@@ -118,9 +121,6 @@ impl std::fmt::Display for CliError {
                 f,
                 "Unable to resolve absolute path for \"{filename:?}\": {error:#?}"
             ),
-            CliError::SourceNotAFile(filename) => {
-                write!(f, "Source path \"{filename:?}\" is not a file.")
-            }
             CliError::SourceNoFileStem(filename) => {
                 write!(f, "Unable to get file name from {filename:?}.")
             }
