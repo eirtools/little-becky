@@ -1,34 +1,56 @@
+#![allow(
+    clippy::unnecessary_debug_formatting,
+    clippy::use_debug,
+    reason = "Print escaped paths"
+)]
+
+use std::process::exit;
+
+use crate::logger::setup_logging;
+
 mod args;
-mod copy;
 mod logger;
 mod process;
 mod state;
 mod time_utils;
+pub(crate) mod utils;
 
 fn main() {
     let args = match args::parse_arguments() {
         Ok(args) => args,
-        Err(err) => {
-            eprintln!("Error: {err}");
-            std::process::exit(1);
+        Err(error) => {
+            #[allow(clippy::print_stderr, reason = "No logger set up yet")]
+            {
+                eprintln!("Error: {error}");
+            };
+            exit(1);
         }
     };
 
-    if args.sources.len() == 0 {
+    if args.sources.is_empty() {
         return;
     }
 
-    crate::logger::setup_logging(args.log_level.clone().into());
+    match setup_logging(args.log_level.clone().into()) {
+        Ok(()) => {}
+        #[allow(clippy::print_stderr, reason = "No logger set up yet")]
+        Err(error) => {
+            eprintln!("Logger must not be previously set up: {error}");
+            exit(1)
+        }
+    }
 
-    if state::initialize_state(&args.sources, &args.destination).is_err() {
-        // Unable to read target folder properly
-        std::process::exit(2);
+    let initial_locations = match state::initialize_state(&args.sources) {
+        Ok(additional) => additional,
+        Err(error) => {
+            log::error!("Initialization error: {error}");
+            exit(2);
+        }
     };
 
-    copy::initial_copy(&args.sources);
+    process::initial_copy(&initial_locations);
+    process::watch(&args.sources, args.fs_timeout);
 
-    if !process::fs_watcher(&args.sources, args.fs_timeout) {
-        // Unable to start notification listeners
-        std::process::exit(3);
-    };
+    // Unable to start notification listeners
+    exit(3);
 }
