@@ -16,11 +16,15 @@ where
     let path = path.to_owned();
 
     let update_result = current_state.update(path.clone(), |state| {
+        let current_time = std::time::Instant::now();
         let mut state = state.clone();
         let last_time = state.last_time;
         state.update(&destination, &update_fn);
 
         if state.last_time != last_time {
+            let elapsed = current_time.elapsed().as_nanos();
+
+            log::debug!("Process time {elapsed} ns for {path:?}");
             log::info!("Current state for {path:?}: {state}");
         }
         state

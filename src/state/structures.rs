@@ -46,8 +46,8 @@ pub(super) struct State {
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct StateUpdateResult {
-    file_id: u64,
-    last_time: u128,
+    pub file_id: u64,
+    pub last_time: u128,
     force_update: bool,
 }
 
@@ -90,11 +90,17 @@ impl State {
             force_update,
         } = update_fn(destination, &self.source_info, self.file_id, self.last_time);
 
+        if file_id == 0 && last_time == 0 {
+            return;
+        }
+
         // initial setup
         let zero_file_id = file_id == 0 && self.file_id == 0 && last_time > self.last_time;
         // after some backups have been made
         let normal_operation =
             file_id > self.file_id && (force_update || last_time > self.last_time);
+
+        log::trace!("Update {:?} with new state ({file_id:x}, {last_time}, {force_update}): {zero_file_id}/{normal_operation}", self.source_info.prefix);
 
         if zero_file_id || normal_operation {
             self.file_id = file_id;
@@ -106,7 +112,7 @@ impl State {
 impl std::fmt::Display for State {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.last_time == 0 {
-            write!(f, "Empty state")
+            write!(f, "Empty state ({:x})", self.file_id)
         } else {
             write!(
                 f,

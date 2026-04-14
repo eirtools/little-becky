@@ -1,4 +1,3 @@
-use ::std::io::ErrorKind;
 use std::path::{absolute, Path, PathBuf};
 
 use crate::state::StateUpdateResult;
@@ -30,7 +29,7 @@ pub fn reset_state(path: &PathBuf) {
 
     match result {
         Ok(_) => {
-            log::info!("Reset \"{path:?}\" info");
+            log::info!("Reset {path:?}");
         }
         Err(error) => {
             log::error!("{error}");
@@ -43,9 +42,7 @@ pub fn backup_path(path: &PathBuf) {
     let path = match absolute(path) {
         Ok(path) => path,
         Err(error) => {
-            if error.kind() != ErrorKind::NotFound {
-                log::error!("Unable to resolve absolute path for \"{path:?}\": {error:#?}");
-            }
+            log::error!("Unable to resolve absolute path for \"{path:?}\": {error:#?}");
             return;
         }
     };
@@ -55,12 +52,15 @@ pub fn backup_path(path: &PathBuf) {
         |destination, source_info, file_id, last_time| -> StateUpdateResult {
             match try_copy_path(destination, &path, source_info, file_id, last_time) {
                 Err(err) => {
-                    if err.kind() != ErrorKind::NotFound {
-                        log::error!("Unable to copy \"{path:?}\": {err}");
-                    }
+                    log::error!("Unable to copy \"{path:?}\": {err}");
                     StateUpdateResult::default()
                 }
-                Ok(result) => result,
+                Ok(result) => {
+                    if result.last_time != 0 {
+                        log::trace!("Updating {path:?}, got {result:?}");
+                    }
+                    result
+                }
             }
         },
     );
@@ -81,16 +81,25 @@ fn try_copy_path(
     file_id: u64,
     last_time: u128,
 ) -> std::io::Result<StateUpdateResult> {
-    let next_number = if last_time > 0 { file_id + 1 } else { file_id };
+    let next_id = if file_id == 0 && last_time == 0 {
+        file_id
+    } else {
+        file_id + 1
+    };
 
+    log::trace!("{source_path:?} Next id: {next_id:x}");
     let file_last_modified = time_utils::fs_time(source_path)?;
 
+    // Skip old copy
     if file_last_modified <= last_time {
+        log::trace!(
+            "no copy: {source_path:?} Next id: {next_id:x}, {file_last_modified}/{last_time}"
+        );
         return Ok(StateUpdateResult::default());
     }
 
     let mut filename = source_info.prefix.clone();
-    filename.push(format!("_{next_number:x}"));
+    filename.push(format!("_{next_id:x}"));
 
     let mut target_filename = destination.to_path_buf();
     target_filename.push(filename);
@@ -99,7 +108,8 @@ fn try_copy_path(
         target_filename.set_extension(extension);
     };
 
+    log::trace!("pre-copy: {source_path:?} Next id: {next_id:x}, {file_last_modified}");
     std::fs::copy(source_path, target_filename)?;
-
-    Ok(StateUpdateResult::new(next_number, file_last_modified))
+    log::trace!("Copied: {source_path:?} Next id: {next_id:x}, {file_last_modified}");
+    Ok(StateUpdateResult::new(next_id, file_last_modified))
 }
