@@ -17,26 +17,46 @@ env:
   RUST_BACKTRACE: 1
   CARGO_NET_RETRY: 10
   BINSTALL_DISABLE_TELEMETRY: true
+  PUBLISH_PACKAGE_NAME: little-becky
 jobs:
-  build-test:
+  build-test: # Build & run tests on Linux and report version for PUBLISH_PACKAGE_NAME
     permissions:
       contents: read
     if: ${{ github.ref == 'refs/heads/main' }}
     name: Build and test
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.publish_version }}
     steps:
     - name: Rust version
       run: |
         rustc --version
         cargo --version
-
-    - uses: actions/checkout@v6
+    - name: Checkout
+      uses: actions/checkout@v6
     - name: Build
       run: cargo build
+    - name: Version
+      id: version
+      run: |
+        publish_version=$(cargo metadata --format-version 1 --no-deps | \
+            jq -er --arg name "$PUBLISH_PACKAGE_NAME" \
+            ' .packages[]
+                | select(.name == $name)
+                | .version
+            '
+        )
+        if [[ $? -ne 0  ]]; then
+            echo "No such package: $PUBLISH_PACKAGE_NAME" >&2;
+            exit 1
+        fi
+        echo "PUBLISH_VERSION=$publish_version" >> $GITHUB_OUTPUT
 
-  build:
+  build-release: # Build
     needs: build-test
     name: Build release for ${{ matrix.target }}
+    outputs:
+      version: ${{ needs.build-test.outputs.version }}
     strategy:
       fail-fast: false
       matrix:
@@ -62,7 +82,7 @@ jobs:
     - name: Build
       uses: taiki-e/upload-rust-binary-action@v1.30.2
       with:
-        bin: little-becky
+        bin: ${{ env.PUBLISH_PACKAGE_NAME }}
         target: ${{ matrix.target }}
         # don't publish on github
         #   we don't allow neither secrets to be used during build process, nor additional permissions
@@ -74,11 +94,11 @@ jobs:
         path: '*-${{ matrix.target }}*'
         retention-days: 1
 
-  publish-github:
+  publish-github-draft: # Publish GitHub draft
     permissions:
       contents: write
     runs-on: ubuntu-latest
-    needs: build
+    needs: build-release
     steps:
     - name: Checkout repo
       uses: actions/checkout@v6
@@ -88,20 +108,37 @@ jobs:
         path: artifacts
     - name: Publish github
       run: |
-        package_version=$(cargo metadata --format-version 1 --no-deps| jq -r '.packages[].version')
-        gh release create "v${package_version}" --fail-on-no-commits --generate-notes  --latest artifacts/*
+        gh release create --draft "v$PUBLISH_VERSION" --fail-on-no-commits --generate-notes  --latest artifacts/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        PUBLISH_VERSION: ${{ needs.build-release.outputs.version }}
 
   publish-cargo:
     runs-on: ubuntu-latest
-    needs: publish-github
+    needs: publish-github-draft
     permissions:
       contents: read
     steps:
     - name: Checkout repo
       uses: actions/checkout@v6
     - name: Package
-      run: cargo publish --no-verify
+      run: cargo publish --no-verify --package "$PUBLISH_PACKAGE_NAME"
       env:
         CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  publish-github-release:
+    runs-on: ubuntu-latest
+    needs: publish-cargo
+    permissions:
+      contents: write  # publish GitHub release
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+    - name: Finalise Github release
+      run: |
+        gh release edit "v$PUBLISH_VERSION" --draft=false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        PUBLISH_VERSION: ${{ needs.build-test.outputs.version }}
