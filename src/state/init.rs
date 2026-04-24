@@ -1,57 +1,155 @@
-use crate::state::{StateInitializeError, DESTINATION_ATM};
+use crate::args::{Location, Source};
+use crate::state::StateInitializeError;
 use crate::time_utils;
-use ::std::io::ErrorKind;
-use std::collections::HashMap as StdHashMap;
-use std::path::{Path, PathBuf};
+use std::fs::create_dir_all;
+use std::path::{Path, PathBuf, absolute};
 
 use super::{SourceInfo, State};
 
 /// Initialize state by reading file information for source files from arguments.
-pub fn initialize_state<'a, I>(sources: I, destination: &Path) -> Result<(), StateInitializeError>
+///
+/// Return known file locations for initial copy.
+pub fn initialize_state<'a, I>(
+    sources: I,
+) -> Result<Vec<Location>, StateInitializeError>
 where
-    I: IntoIterator<Item = &'a PathBuf>,
+    I: IntoIterator<Item = &'a Source>,
 {
-    {
-        if let Err(_) = DESTINATION_ATM.set(std::sync::Arc::new(destination.to_path_buf())) {
-            return Err(StateInitializeError::DoubleInitialization);
+    let mut file_locations = vec![];
+    let guard = super::STATE.guard();
+
+    let mut insert = |path: PathBuf, state: State| {
+        super::STATE.insert(path, state, &guard);
+    };
+    for source in sources {
+        match source {
+            Source::File(location) => {
+                file_locations.push(location.clone());
+                register_file_source(
+                    &location.source,
+                    &location.destination,
+                    &mut insert,
+                )?;
+            }
+            Source::Folder(location) => {
+                file_locations.extend(register_folder_source(location, &mut insert)?);
+            }
         }
     }
 
-    let result = maximum_known_values(sources, destination)?;
+    Ok(file_locations)
+}
 
-    let current_state = super::STATE.pin();
-
-    current_state.clear();
-
-    for (path, state) in result {
-        current_state.insert(path, state);
+/// Register file source.
+fn register_file_source<F>(
+    source: &Path,
+    destination: &Path,
+    insert: &mut F,
+) -> Result<(), StateInitializeError>
+where
+    F: FnMut(PathBuf, State),
+{
+    let source_info: SourceInfo = SourceInfo::try_from(source)?;
+    let state = scan_existing_backups(destination, source, &source_info)?;
+    if state.last_time() > 0 {
+        log::info!("Initial known state for {source:?}: {state}");
     }
+
+    insert(source.to_path_buf(), state);
 
     Ok(())
 }
 
-/// Populate known state for all files.
-fn maximum_known_values<'a, I>(
-    sources: I,
-    destination: &Path,
-) -> Result<StdHashMap<PathBuf, State>, StateInitializeError>
+/// Try to Register a path met during watching.
+pub fn try_register_path<F>(source: &Path, lookup_fn: F) -> bool
 where
-    I: IntoIterator<Item = &'a PathBuf>,
+    F: FnOnce(&Path) -> Option<PathBuf>,
 {
-    let mut result: StdHashMap<PathBuf, State> = StdHashMap::new();
+    let guard = super::STATE.guard();
 
-    for path in sources {
-        let source_info: SourceInfo = path.as_path().try_into()?;
-        let state = maximum_known_value(destination, path, &source_info)?;
-        log::info!("Initial state for {path:?}: {state}");
-        result.insert(path.clone(), state);
+    log::trace!("Registering additional path {source:?}");
+    if super::STATE.contains_key(source, &guard) {
+        return true;
     }
 
-    Ok(result)
+    let Some(destination) = lookup_fn(source) else {
+        return false; // ignore unknown path
+    };
+
+    #[allow(
+        clippy::let_underscore_must_use,
+        reason = "ignore insertion if its already done"
+    )]
+    let mut insert = |path: PathBuf, state: State| {
+        _ = super::STATE.try_insert(path, state, &guard);
+    };
+
+    match register_file_source(source, &destination, &mut insert) {
+        Ok(()) => {
+            log::trace!("Registered additional path: {source:?} ");
+            true
+        }
+        Err(error) => {
+            log::error!("Error while registering {source:?}: {error}");
+            false
+        }
+    }
 }
 
-/// Populate known state for one file.
-fn maximum_known_value(
+/// Register all files (non-recursive) under folder source.
+fn register_folder_source<F>(
+    location: &Location,
+    insert: &mut F,
+) -> Result<Vec<Location>, StateInitializeError>
+where
+    F: FnMut(PathBuf, State),
+{
+    create_dir_all(&location.destination).map_err(|error| {
+        StateInitializeError::ReadDestinationFolder {
+            folder: location.destination.clone(),
+            error,
+        }
+    })?;
+
+    let read_dir = location.source.read_dir().map_err(|error| {
+        StateInitializeError::ReadDestinationFolder {
+            folder: location.source.clone(),
+            error,
+        }
+    })?;
+
+    let mut additional = vec![];
+
+    for dir_entry in read_dir {
+        let entry =
+            dir_entry.map_err(|error| StateInitializeError::ReadDestinationFolder {
+                folder: location.source.clone(),
+                error,
+            })?;
+        let source = absolute(entry.path()).map_err(|error| {
+            StateInitializeError::ReadDestinationFolder {
+                folder: location.source.clone(),
+                error,
+            }
+        })?;
+
+        if !source.is_file() {
+            continue;
+        }
+
+        register_file_source(&source, &location.destination, insert)?;
+
+        additional.push(Location {
+            source,
+            destination: location.destination.clone(),
+        });
+    }
+
+    Ok(additional)
+}
+
+/// Scan existitng backups to populate state.
+fn scan_existing_backups(
     destination: &Path,
     source: &Path,
     source_info: &SourceInfo,
@@ -62,58 +160,50 @@ fn maximum_known_value(
     let prefix_with_underscore = {
         let mut prefix = source_info.prefix.clone();
         prefix.push("_");
-        prefix.to_str().map(|a| a.to_owned())
-    };
-
-    let Some(prefix_with_underscore) = prefix_with_underscore else {
-        log::error!("Unable to convert source prefix to UTF-8 string");
-        return Err(StateInitializeError::UTF8ConversionError {
-            source: source.to_path_buf(),
-        });
+        prefix.to_str().map(ToOwned::to_owned).ok_or_else(|| {
+            StateInitializeError::UTF8ConversionError {
+                source: source.to_path_buf(),
+            }
+        })?
     };
 
     let extension = source_info.extension.as_deref();
+
     let read_dir = match destination.read_dir() {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("Unable to read dir {destination:?}: {e}");
-            return Err(StateInitializeError::ReadDestination {
+        Ok(read_dir) => read_dir,
+        Err(error) => {
+            return Err(StateInitializeError::ReadDestinationFolder {
                 folder: destination.to_path_buf(),
-                error: e,
+                error,
             });
         }
     };
 
-    for file in read_dir {
-        let file = match file {
-            Ok(v) => v,
-            Err(e) => {
-                return Err(StateInitializeError::ReadDestination {
+    for dir_entry in read_dir {
+        let entry = match dir_entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                return Err(StateInitializeError::ReadDestinationFolder {
                     folder: destination.to_path_buf(),
-                    error: e,
+                    error,
                 });
             }
         };
 
-        let path = file.path();
+        let path = entry.path();
 
-        let is_file = match file.file_type() {
-            Ok(v) => v.is_file(),
-            Err(err) => {
-                // TODO: add flag
-                if err.kind() == ErrorKind::NotFound {
-                    // playing with hope
-                    true
-                } else {
-                    log::warn!("Unable to get file type for file {path:?}: {err}");
-                    continue;
-                }
+        #[allow(clippy::filetype_is_file, reason = "Only regular files are supported")]
+        let is_file = match entry.file_type() {
+            Ok(file_type) => file_type.is_file(),
+            Err(error) => {
+                log::warn!("Unable to get file type for file {path:?}: {error}");
+                continue;
             }
         };
 
         let file_ext = path.extension();
 
-        let Some(filename) = path.file_stem().and_then(|f| f.to_str()) else {
+        let Some(filename) = path.file_stem().and_then(|stem| stem.to_str()) else {
             log::warn!("Unable to get UTF-8 file stem: {path:?}");
             continue;
         };
@@ -141,14 +231,9 @@ fn maximum_known_value(
         // get last time
         let last_time_fs = match time_utils::fs_time(&path) {
             Ok(last_time_fs) => last_time_fs,
-            Err(err) => {
-                // TODO: add flag
-                if err.kind() == ErrorKind::NotFound {
-                    0
-                } else {
-                    log::warn!("Unable to get file timestamp: {path:?}: {err}");
-                    continue;
-                }
+            Err(error) => {
+                log::warn!("Unable to get file timestamp: {path:?}: {error}");
+                continue;
             }
         };
 
@@ -161,9 +246,10 @@ fn maximum_known_value(
         }
     }
 
-    if last_time > 0 {
-        Ok(State::new(source_info.clone(), number, last_time))
-    } else {
-        Ok(State::new(source_info.clone(), 0, 0))
-    }
+    Ok(State::new(
+        destination.to_path_buf(),
+        source_info.clone(),
+        number,
+        last_time,
+    ))
 }

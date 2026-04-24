@@ -1,30 +1,33 @@
-use log::LevelFilter;
-use simplelog::TermLogger;
+use log::{LevelFilter, SetLoggerError};
 
 use crate::args::Verbosity;
 
-/// Setup logging with given logging level
-pub fn setup_logging(log_level: LevelFilter) {
+/// Setup logging with given logging level.
+pub fn setup_logging(log_level: LevelFilter) -> Result<(), SetLoggerError> {
+    use simplelog::{ColorChoice, Config, TermLogger};
+
     TermLogger::init(
         log_level,
-        Default::default(),
+        Config::default(),
         simplelog::TerminalMode::Stderr,
-        Default::default(),
-    )
-    .expect("Logger must not be previously set up");
+        ColorChoice::default(),
+    )?;
 
     log::trace!("Setting log level to {log_level}");
+
+    Ok(())
 }
 
 impl From<Verbosity> for log::LevelFilter {
+    #[inline]
     fn from(val: Verbosity) -> Self {
         match val {
-            Verbosity::Off => log::LevelFilter::Off,
-            Verbosity::Error => log::LevelFilter::Error,
-            Verbosity::Warning => log::LevelFilter::Warn,
-            Verbosity::Info => log::LevelFilter::Info,
-            Verbosity::Debug => log::LevelFilter::Debug,
-            Verbosity::Trace => log::LevelFilter::Trace,
+            Verbosity::Off => Self::Off,
+            Verbosity::Error => Self::Error,
+            Verbosity::Warning => Self::Warn,
+            Verbosity::Info => Self::Info,
+            Verbosity::Debug => Self::Debug,
+            Verbosity::Trace => Self::Trace,
         }
     }
 }

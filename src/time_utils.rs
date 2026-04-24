@@ -1,24 +1,21 @@
+use std::io::Error;
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Local};
 
-/// Local time in nanoseconds
-pub fn local_now() -> u128 {
-    as_nanos(SystemTime::now())
-}
-
-/// Filesystem time in nanoseconds
-pub fn fs_time(file: &std::path::Path) -> Result<u128, std::io::Error> {
+/// Filesystem time in nanoseconds.
+pub fn fs_time(file: &Path) -> Result<u128, Error> {
     Ok(as_nanos(file.metadata()?.modified()?))
 }
 
-/// Utility function to convert time into nanoseconds
+/// Utility function to convert time into nanoseconds.
 fn as_nanos(time: SystemTime) -> u128 {
     time.duration_since(UNIX_EPOCH)
         .map_or(0, |dur| dur.as_nanos())
 }
 
-/// Format given time to human-readable string in system local timezone
+/// Format given time to human-readable string in system local timezone.
 pub fn format_time(time: u128) -> String {
     if time > i64::MAX as u128 {
         time.to_string()
