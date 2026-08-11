@@ -20,7 +20,7 @@ papaya = { version = "0.2.4" }
 log = { version = "0.4.29" }
 simplelog = { version = "0.12.2" }
 
-chrono = { version = "0.4.44" }
+chrono = { version = "0.4.45" }
 
 [features]
 non-existing-option = []
