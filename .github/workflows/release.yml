@@ -33,7 +33,7 @@ jobs:
         rustc --version
         cargo --version
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
     - name: Build
       run: cargo build
     - name: Version
@@ -76,7 +76,7 @@ jobs:
         rustc --version
         cargo --version
     - name: Checkout repo
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
     - name: Cache Cargo
       uses: ./.github/actions/cache
     - name: Build
@@ -101,7 +101,7 @@ jobs:
     needs: build-release
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
     - uses: actions/download-artifact@v8
       with:
         merge-multiple: true
@@ -120,7 +120,7 @@ jobs:
       contents: read
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
     - name: Package
       run: cargo publish --no-verify --package "$PUBLISH_PACKAGE_NAME"
       env:
@@ -133,7 +133,7 @@ jobs:
       contents: write  # publish GitHub release
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         persist-credentials: false
     - name: Finalise Github release
